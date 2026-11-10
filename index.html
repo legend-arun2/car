@@ -211,7 +211,12 @@ const noiseH = (x, z) => 16 * Math.sin(x * 0.0055 + 1.3) * Math.cos(z * 0.0049) 
     for (let j = cj - rc; j <= cj + rc; j++) for (let k = ci - rc; k <= ci + rc; k++) {
       if (j < 0 || k < 0 || j >= GH || k >= GW) continue;
       const d = Math.hypot(OX + k * CELL - p.x, OZ + j * CELL - p.z), idx = j * GW + k;
-      if (d < DIST[idx]) { DIST[idx] = d; RH[idx] = p.y; }
+      if (d < DIST[idx]) {
+        DIST[idx] = d; // road height blended between the two nearest centre-line samples, so the surface has no steps
+        const nx = OX + k * CELL, nz = OZ + j * CELL, a = Track.P[(i + Track.N - 1) % Track.N], b = Track.P[(i + 1) % Track.N];
+        const nb = Math.hypot(nx - a.x, nz - a.z) < Math.hypot(nx - b.x, nz - b.z) ? a : b, ex = nb.x - p.x, ez = nb.z - p.z;
+        RH[idx] = lerp(p.y, nb.y, clamp(((nx - p.x) * ex + (nz - p.z) * ez) / (ex * ex + ez * ez), 0, 1));
+      }
     }
   }
   for (let j = 0; j < GH; j++) for (let k = 0; k < GW; k++) {
@@ -528,6 +533,7 @@ const torqueAt = rpm => { for (let i = 1; i < TQ.length; i++) if (rpm <= TQ[i][0
 const BODY_PTS = [[1.95, 0.4, .75], [1.95, 0.4, -.75], [-1.95, 0.4, .75], [-1.95, 0.4, -.75], [.5, 1.2, .62], [.5, 1.2, -.62], [-.8, 1.28, .62], [-.8, 1.28, -.62], [2.25, 0.55, 0], [-2.25, 0.6, 0]];
 const SPH = [[-1.5, 0.1], [0, 0.1], [1.5, 0.1]], SPH_R = 0.95;
 const KB = 1.75, CB = 1.5, EB = 0.2, KPK = 0.16, APK = 0.16;
+const AY_EASY = 27, AY_NORMAL = 22, SIDE_AY = 14; // assist tuning: asked-for turn rate (m/s^2 at full lock) and the cap on the sideways-velocity correction
 
 const _v = new V3(), _w = new V3();
 class Car {
@@ -596,13 +602,18 @@ class Car {
       this.steerS += clamp(inp.steer - this.steerS, -rate * dt, rate * dt);
       this.delta = this.steerS * this.dmax; this.scTarget = 0;
     } else {
-      // Normal and Easy: smaller wheel angles at speed, slower steer-in, and the car steers toward its own direction of travel
-      this.dmax = 0.42 / (1 + Math.pow(sp / 18, 2)) + 0.04;
+      // Normal and Easy: smaller wheel angles at speed (like Gran Turismo and Forza), quick turn-in, and the car
+      // steers toward its own direction of travel. The steering input also asks for a turn rate, which the yaw
+      // assist below pushes the car toward, so it turns the same way at 60 and at 200 km/h.
+      this.dmax = 0.5 / (1 + Math.pow(sp / 22, 2)) + 0.04;
       let steerIn = inp.steer;
       if (!lock && sp > 6 && vF > 0) steerIn = clamp(steerIn + 0.5 * Math.atan2(this.vLocal.z, Math.max(3, this.vLocal.x)) / this.dmax, -1, 1);
-      const rate = this.analog ? 6 : Math.sign(steerIn) === Math.sign(this.steerS) && steerIn !== 0 ? 1.9 : 5.5;
+      const rate = this.analog ? 7 : Math.sign(steerIn) === Math.sign(this.steerS) && steerIn !== 0 ? 4.2 : 6.5;
       this.steerS += clamp(steerIn - this.steerS, -rate * dt, rate * dt);
-      this.delta = this.steerS * this.dmax; this.scTarget = vF * Math.tan(this.delta) / 2.62;
+      this.delta = this.steerS * this.dmax;
+      const ayCap = (lvl === 2 ? AY_EASY : AY_NORMAL) * (0.55 + 0.45 * SURF[this.surf].mu); // turn rate the player is asking for, as sideways acceleration at full lock
+      const bl = smooth(8, 16, vF);
+      this.scTarget = lerp(vF * Math.tan(this.delta) / 2.62, this.steerS * ayCap / Math.max(vF, 8), bl);
     }
     // --- engine / gearbox
     const gr = reverse ? REVG * FINAL : GEAR[this.gear] * FINAL;
@@ -647,7 +658,7 @@ class Car {
       const f = wf.addScaledVector(n, -wf.dot(n)).normalize(), s = new V3().crossVectors(f, n);
       const vc = new V3().crossVectors(this.w, r).add(this.v), vx = vc.dot(f), vy = vc.dot(s);
       const sf = SURF[W.surf = surfaceAt(cp.x, cp.z)];
-      const mu = sf.mu * clamp(1.18 - 0.00005 * Fz, 0.85, 1.18) * (assist ? (lvl === 2 ? 1.22 : 1.12) : 1.08) * (W.front ? 1 : 1.05) * (!W.front && hand > 0.5 ? (assist ? 0.85 : 0.7) : 1);
+      const mu = sf.mu * clamp(1.18 - 0.00005 * Fz, 0.85, 1.18) * (assist ? (lvl === 2 ? 1.22 : 1.12) * (1 + (lvl === 2 ? 0.3 : 0.2) * smooth(15, 45, this.speed)) : 1.08) * (W.front ? 1 : 1.05) * (!W.front && hand > 0.5 ? (assist ? 0.85 : 0.7) : 1);
       const den = Math.max(Math.abs(vx), 2.5);
       const kap = (W.om * WRAD - vx) / den, tanA = vy / den;
       const sx = kap / KPK, sy = tanA / APK, sg = Math.hypot(sx, sy);
@@ -687,9 +698,16 @@ class Car {
       const wy = this.w.dot(up);
       this.w.addScaledVector(up, -wy).multiplyScalar(1 - 1.2 * dt).addScaledVector(up, wy); // calmer roll and pitch
       if (ground >= 3 && sp > 8 && vF > 0) { // stability control: pull the yaw rate toward what the steering asks for
-        const excess = wy + this.scTarget;
-        this.w.addScaledVector(up, -excess * clamp((hand > 0.5 ? 0.8 : lvl === 2 ? 4.5 : 2.5) * dt, 0, 1));
+        const excess = wy + this.scTarget, steering = Math.abs(this.steerS) > 0.05;
+        this.w.addScaledVector(up, -excess * clamp((hand > 0.5 ? 0.8 : steering ? (lvl === 2 ? 7 : 5) : (lvl === 2 ? 4.5 : 2.5)) * dt, 0, 1));
       }
+      // velocity-aligned grip: bleed off sideways velocity so the car goes where it points (arcade handling)
+      if (ground >= 2 && sp > 5) {
+        const vl = this.v.dot(rgt), kA = (hand > 0.5 ? 0.3 : 1) * (lvl === 2 ? 5 : 3.2) * ground / 4;
+        this.v.addScaledVector(rgt, -clamp(kA * vl, -SIDE_AY, SIDE_AY) * dt);
+      }
+      // turn-in scrub: the car sheds speed while steering hard at speed, so the turn tightens
+      if (ground >= 2 && vF > 20) this.v.addScaledVector(fwd, -(lvl === 2 ? 6 : 4) * Math.abs(this.steerS) * smooth(20, 50, vF) * dt);
     }
     p.addScaledVector(this.v, dt);
     const dq = new Q4(this.w.x, this.w.y, this.w.z, 0).multiply(q);
@@ -1001,7 +1019,8 @@ function updateCamera(dt) {
   camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 0.8);
   camShake = Math.max(0, camShake - dt * 2.2); const sh = camShake * 0.35 + (car.onGround ? sp / 70 * 0.015 * (car.surf === 2 ? 2 : 1) : 0);
   camera.position.x += (Math.random() - 0.5) * sh; camera.position.y += (Math.random() - 0.5) * sh;
-  camLook.set(car.p.x + dx * 4, car.p.y + 0.9, car.p.z + dz * 4); camera.lookAt(camLook);
+  const lookSide = car.steerS * 3.2 * smooth(10, 40, sp) * (car.assistLvl > 0 && !car.auto ? 1 : 0); // look into the turn at speed
+  camLook.set(car.p.x + dx * 4 - dz * lookSide, car.p.y + 0.9, car.p.z + dz * 4 + dx * lookSide); camera.lookAt(camLook);
   camera.fov = (innerWidth / innerHeight < 1 ? 82 : 60) + 14 * smooth(10, 62, sp); camera.updateProjectionMatrix();
 }
 
@@ -1158,5 +1177,5 @@ showTouch = coarse || 'ontouchstart' in window; $('chkTouch').checked = showTouc
 $('chkTouch').onchange = e => { showTouch = e.target.checked; if (game.state !== 'menu') $('touch').hidden = !showTouch; };
 
 setupGrid(); resize(); requestAnimationFrame(t => { last = t; frame(t); });
-window.__dbg = { simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids };
+window.__dbg = { OBST, simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids };
 </script>
