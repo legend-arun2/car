@@ -2,7 +2,8 @@
 
 A single-file 3D off-road rally racing game built with three.js, using the Rally Supercar model.
 
-- Full-physics driving (suspension, tyre slip, gearbox, damage) with driver assists for the player
+- Full-physics driving (suspension, tyre slip, gearbox, damage) with three driving-assist levels: Easy, Normal and Pro
+- Racing line on the road that turns amber and red before corners, with a brake marker
 - 1-5 AI opponents, 1-5 laps, three difficulty levels
 - Keyboard and touch controls, procedural engine sound, dust and tyre marks, minimap
 
@@ -16,4 +17,4 @@ python3 -m http.server 8000
 
 ## Controls
 
-W/S throttle and brake, A/D or arrows steer, Space handbrake, R reset to road, M mute.
+W/S throttle and brake, A/D or arrows steer, Space handbrake, R reset to road, M mute, L racing line on/off.

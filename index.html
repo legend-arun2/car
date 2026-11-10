@@ -46,13 +46,16 @@ html,body{height:100%;margin:0;background:var(--ink);color:var(--sand);font-fami
 #hint b{background:var(--signal);color:#fff;border-radius:4px;padding:2px 7px;font-family:var(--disp);font-size:16px}
 .ibtn{pointer-events:auto;background:var(--panel);border:1px solid var(--line);color:var(--sand);border-radius:6px;font:600 12px var(--body);letter-spacing:.12em;text-transform:uppercase;padding:7px 10px;cursor:pointer}
 .ibtn:hover{border-color:var(--sand)}
+.ibtn[aria-pressed=true]{border-color:var(--amber);color:var(--amber)}
+.hint{font:400 13px/1.4 var(--body);color:var(--dim);min-height:2.8em}
 .ibtn:focus-visible,.seg button:focus-visible,.cta:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 /* menu */
-.screen{position:absolute;inset:0;display:flex;align-items:center;padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:linear-gradient(90deg,rgba(16,13,11,.88) 0%,rgba(16,13,11,.55) 46%,rgba(16,13,11,0) 80%);overflow:auto}
+.screen{position:absolute;inset:0;display:flex;align-items:flex-start;padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:linear-gradient(90deg,rgba(16,13,11,.88) 0%,rgba(16,13,11,.55) 46%,rgba(16,13,11,0) 80%);overflow:auto}
 .screen[hidden]{display:none}
-.card{width:min(460px,100%);display:flex;flex-direction:column;gap:18px}
+.card{width:min(460px,100%);display:flex;flex-direction:column;gap:18px;margin-block:auto}
+@media (max-height:800px){.card{gap:12px}.sub{display:none}}
 .eyebrow{font:600 12px var(--body);letter-spacing:.22em;text-transform:uppercase;color:var(--signal)}
-h1{margin:0;font:700 clamp(54px,11vw,104px)/.82 var(--disp);letter-spacing:.01em;text-transform:uppercase;text-wrap:balance}
+h1{margin:0;font:700 clamp(54px,min(11vw,13vh),104px)/.82 var(--disp);letter-spacing:.01em;text-transform:uppercase;text-wrap:balance}
 h1 span{color:var(--signal)}
 .sub{margin:0;color:var(--dim);font-size:15px;line-height:1.45;max-width:40ch}
 .opt{display:flex;flex-direction:column;gap:7px}
@@ -98,6 +101,7 @@ table.res tr.me td{color:var(--amber);font-weight:700}
     <div id="tr">
       <div class="chip" id="mapwrap"><canvas id="map" width="320" height="320"></canvas></div>
       <div class="chip" id="times"><span class="lbl">Race time</span><b id="tnow">0:00.000</b><span id="tlast">Last lap  --</span><span id="tbest">Best lap  --</span></div>
+      <button class="ibtn" id="btnLine" type="button" aria-pressed="true">Racing line</button>
       <button class="ibtn" id="btnMenu" type="button">Menu</button>
     </div>
     <div id="bl"><span class="lbl">Body</span><div class="bar"><i id="dmg"></i></div><span class="lbl" id="surf">Gravel</span></div>
@@ -122,12 +126,13 @@ table.res tr.me td{color:var(--amber);font-weight:700}
       <div class="opt"><span class="lbl">Opponents</span><div class="seg" id="sOpp"></div></div>
       <div class="opt"><span class="lbl">Laps</span><div class="seg" id="sLaps"></div></div>
       <div class="opt"><span class="lbl">AI difficulty</span><div class="seg words" id="sDiff"></div></div>
+      <div class="opt"><span class="lbl">Driving assist</span><div class="seg words" id="sAssist"></div><span class="hint" id="assistHint"></span></div>
       <button class="cta" id="btnStart" type="button">Start engine</button>
       <div class="keys">
         <span><kbd>W</kbd> <kbd>S</kbd></span><span>Throttle, brake and reverse</span>
         <span><kbd>A</kbd> <kbd>D</kbd></span><span>Steer (arrow keys work too)</span>
         <span><kbd>Space</kbd></span><span>Handbrake</span>
-        <span><kbd>R</kbd> <kbd>M</kbd></span><span>Reset to road, mute</span>
+        <span><kbd>R</kbd> <kbd>M</kbd> <kbd>L</kbd></span><span>Reset to road, mute, racing line</span>
       </div>
       <label class="chk"><input type="checkbox" id="chkTouch"> Show touch controls</label>
     </div>
@@ -536,7 +541,7 @@ class Car {
     this.vFwd = 0; this.speed = 0; this.vLocal = new V3(); this.upY = 1; this.idx = 0; this.lapCount = -1; this.prog = 0;
     this.skill = 1; this.lane = 0; this.laneCur = 0; this.stuckT = 0; this.flipT = 0; this.offT = 0; this.wrongT = 0; this.impactCd = 0;
     this.finished = false; this.finishT = 0; this.lapStart = 0; this.lapTimes = []; this.curLap = 0; this.locked = true; this.auto = false;
-    this.slipRear = 0; this.onGround = 0; this.surf = 0;
+    this.slipRear = 0; this.onGround = 0; this.surf = 0; this.assistLvl = 1; this.rtDes = 0; this.scTarget = 0; this.distRoad = 0;
   }
   place(x, z, dx, dz) {
     this.p.set(x, heightAt(x, z) + COMY + 0.15, z); this.q.setFromAxisAngle(UP, Math.atan2(-dz, dx)); this.v.set(0, 0, 0); this.w.set(0, 0, 0);
@@ -568,24 +573,37 @@ class Car {
     this.vLocal.copy(this.v).applyQuaternion(this.qInv);
     // --- driver inputs
     const inp = this.inp, lock = this.locked;
-    const assist = !this.ai && !this.auto; // driver aids for the human player
+    const lvl = (this.ai || this.auto) ? 0 : this.assistLvl, assist = lvl > 0; // driver aids: 0 Pro, 1 Normal, 2 Easy (player only)
     let thr = lock ? 0 : inp.thr, brk = lock ? 1 : inp.brk, hand = lock ? 1 : inp.hand;
     let reverse = this.reverse;
     if (!lock) { if (vF < 0.8 && brk > 0.1 && thr < 0.1) reverse = true; if (thr > 0.1 && vF > -0.8) reverse = false; }
     this.reverse = reverse;
     let driveCmd = reverse ? brk : thr, brakeCmd = reverse ? 0 : brk;
     if (reverse && thr > 0.1) brakeCmd = thr;
+    const sp = Math.abs(vF);
+    // Easy: brake automatically when entering a corner much faster than the road allows
+    if (lvl === 2 && !lock && !reverse && vF > 5 && this.distRoad < HALFW + 3) {
+      const vlim = Track.vProf[(this.idx + Math.ceil(sp * 0.9 / Track.SP)) % Track.N] * 1.1;
+      if (sp > vlim) { brakeCmd = Math.max(brakeCmd, clamp((sp - vlim) * 0.15, 0, 0.6)); driveCmd *= 0.3; }
+    }
     this.thr += clamp(driveCmd - this.thr, -dt * 8, dt * (assist ? 3.2 : 5)); let dthr = this.thr;
     // traction control: ease off the throttle when the driven wheels spin
-    if (assist && !reverse) dthr *= 1 - clamp((this.slipRear - 0.12) * 3, 0, 0.7);
-    const sp = Math.abs(vF);
-    this.dmax = assist ? 0.42 / (1 + Math.pow(sp / 18, 2)) + 0.04 : 0.52 / (1 + Math.pow(sp / 28, 2)) + 0.05;
-    let steerIn = inp.steer;
-    // counter-steer assist: turn the wheels toward the direction the car is actually travelling
-    if (assist && !lock && sp > 6) steerIn = clamp(steerIn + 0.5 * Math.atan2(this.vLocal.z, Math.max(3, this.vLocal.x)) / this.dmax * (vF > 0 ? 1 : 0), -1, 1);
-    const rate = this.ai || this.analog ? 5 : assist ? (Math.sign(steerIn) === Math.sign(this.steerS) && steerIn !== 0 ? 1.9 : 5.5) : (Math.sign(inp.steer) === Math.sign(this.steerS) && inp.steer !== 0 ? 2.4 : 4.2);
-    this.steerS += clamp(steerIn - this.steerS, -rate * dt, rate * dt);
-    this.delta = this.steerS * this.dmax;
+    if (assist && !reverse) dthr *= 1 - clamp((this.slipRear - (lvl === 2 ? 0.08 : 0.12)) * (lvl === 2 ? 4 : 3), 0, 0.7);
+    if (!assist) {
+      // Pro: the steering input sets the wheel angle directly
+      this.dmax = 0.52 / (1 + Math.pow(sp / 28, 2)) + 0.05;
+      const rate = this.ai || this.analog ? 5 : (Math.sign(inp.steer) === Math.sign(this.steerS) && inp.steer !== 0 ? 2.4 : 4.2);
+      this.steerS += clamp(inp.steer - this.steerS, -rate * dt, rate * dt);
+      this.delta = this.steerS * this.dmax; this.scTarget = 0;
+    } else {
+      // Normal and Easy: smaller wheel angles at speed, slower steer-in, and the car steers toward its own direction of travel
+      this.dmax = 0.42 / (1 + Math.pow(sp / 18, 2)) + 0.04;
+      let steerIn = inp.steer;
+      if (!lock && sp > 6 && vF > 0) steerIn = clamp(steerIn + 0.5 * Math.atan2(this.vLocal.z, Math.max(3, this.vLocal.x)) / this.dmax, -1, 1);
+      const rate = this.analog ? 6 : Math.sign(steerIn) === Math.sign(this.steerS) && steerIn !== 0 ? 1.9 : 5.5;
+      this.steerS += clamp(steerIn - this.steerS, -rate * dt, rate * dt);
+      this.delta = this.steerS * this.dmax; this.scTarget = vF * Math.tan(this.delta) / 2.62;
+    }
     // --- engine / gearbox
     const gr = reverse ? REVG * FINAL : GEAR[this.gear] * FINAL;
     let wsum = 0; for (const W of this.wh) wsum += W.om; const wavg = wsum / 4 * (reverse ? -1 : 1);
@@ -629,7 +647,7 @@ class Car {
       const f = wf.addScaledVector(n, -wf.dot(n)).normalize(), s = new V3().crossVectors(f, n);
       const vc = new V3().crossVectors(this.w, r).add(this.v), vx = vc.dot(f), vy = vc.dot(s);
       const sf = SURF[W.surf = surfaceAt(cp.x, cp.z)];
-      const mu = sf.mu * clamp(1.18 - 0.00005 * Fz, 0.85, 1.18) * 1.08 * (W.front ? 1 : 1.05) * (!W.front && hand > 0.5 ? (assist ? 0.85 : 0.7) : 1);
+      const mu = sf.mu * clamp(1.18 - 0.00005 * Fz, 0.85, 1.18) * (assist ? (lvl === 2 ? 1.22 : 1.12) : 1.08) * (W.front ? 1 : 1.05) * (!W.front && hand > 0.5 ? (assist ? 0.85 : 0.7) : 1);
       const den = Math.max(Math.abs(vx), 2.5);
       const kap = (W.om * WRAD - vx) / den, tanA = vy / den;
       const sx = kap / KPK, sy = tanA / APK, sg = Math.hypot(sx, sy);
@@ -661,16 +679,16 @@ class Car {
     this.slipRear = rearSlip; this.onGround = ground;
     this.surf = this.wh.reduce((a, W) => W.hit ? Math.max(a, W.surf) : a, 0);
     // aero
-    const vv = this.speed; F.addScaledVector(this.v, -0.5 * 1.2 * 0.7 * vv); F.y -= 0.5 * 1.2 * 0.5 * vv * vv * 0.6;
+    const vv = this.speed; F.addScaledVector(this.v, -0.5 * 1.2 * 0.7 * vv); F.y -= (assist ? 0.9 : 0.18) * vv * vv;
     // --- integrate
     this.v.addScaledVector(F, dt / MASS);
     this.w.add(this.invMul(T).multiplyScalar(dt)); this.w.multiplyScalar(1 - 0.15 * dt);
     if (assist) {
       const wy = this.w.dot(up);
       this.w.addScaledVector(up, -wy).multiplyScalar(1 - 1.2 * dt).addScaledVector(up, wy); // calmer roll and pitch
-      if (ground >= 3 && sp > 8 && vF > 0) { // stability control: damp yaw beyond what the steering asks for
-        const expected = -vF * Math.tan(this.delta) / 2.62, excess = wy - expected; // +z is right, so a right turn is negative yaw
-        this.w.addScaledVector(up, -excess * clamp((hand > 0.5 ? 0.8 : 3.0) * dt, 0, 1));
+      if (ground >= 3 && sp > 8 && vF > 0) { // stability control: pull the yaw rate toward what the steering asks for
+        const excess = wy + this.scTarget;
+        this.w.addScaledVector(up, -excess * clamp((hand > 0.5 ? 0.8 : lvl === 2 ? 4.5 : 2.5) * dt, 0, 1));
       }
     }
     p.addScaledVector(this.v, dt);
@@ -727,7 +745,7 @@ class Dust {
     g.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage)); g.setAttribute('aAlpha', new THREE.BufferAttribute(this.alp, 1).setUsage(THREE.DynamicDrawUsage));
     this.mat = new THREE.ShaderMaterial({
       uniforms: { uScale: { value: 600 } }, transparent: true, depthWrite: false,
-      vertexShader: 'attribute vec3 aColor;attribute float aSize;attribute float aAlpha;varying vec3 vC;varying float vA;uniform float uScale;void main(){vC=aColor;vec4 mv=modelViewMatrix*vec4(position,1.0);vA=aAlpha*smoothstep(2.0,7.0,-mv.z);gl_PointSize=aSize*uScale/max(-mv.z,0.5);gl_Position=projectionMatrix*mv;}',
+      vertexShader: 'attribute vec3 aColor;attribute float aSize;attribute float aAlpha;varying vec3 vC;varying float vA;uniform float uScale;void main(){vC=aColor;vec4 mv=modelViewMatrix*vec4(position,1.0);vA=aAlpha*smoothstep(5.0,16.0,-mv.z);gl_PointSize=aSize*uScale/max(-mv.z,0.5);gl_Position=projectionMatrix*mv;}',
       fragmentShader: 'varying vec3 vC;varying float vA;void main(){vec2 d=gl_PointCoord-.5;float r=dot(d,d)*4.;float a=smoothstep(1.,0.,r)*vA;if(a<.01)discard;gl_FragColor=vec4(vC,a);}'
     });
     this.pts = new THREE.Points(g, this.mat); this.pts.frustumCulled = false; this.pts.renderOrder = 5; scene.add(this.pts);
@@ -743,7 +761,7 @@ class Dust {
       this.age[i] = a + dt; const k = i * 3, u = this.age[i] / this.life[i];
       this.vel[k] *= 1 - 1.6 * dt; this.vel[k + 1] += (0.4 - this.vel[k + 1]) * dt; this.vel[k + 2] *= 1 - 1.6 * dt;
       this.pos[k] += this.vel[k] * dt; this.pos[k + 1] += this.vel[k + 1] * dt; this.pos[k + 2] += this.vel[k + 2] * dt;
-      this.size[i] = this.s0[i] * (1 + u * 2.2); this.alp[i] = this.a0[i] * (1 - u) * (1 - u) * Math.min(1, u * 12);
+      this.size[i] = this.s0[i] * (1 + u * 1.6); this.alp[i] = this.a0[i] * (1 - u) * (1 - u) * Math.min(1, u * 12);
     }
     this.geo.attributes.position.needsUpdate = this.geo.attributes.aSize.needsUpdate = this.geo.attributes.aAlpha.needsUpdate = this.geo.attributes.aColor.needsUpdate = true;
   }
@@ -810,8 +828,42 @@ const AI_NAMES = ['Ember', 'Cobalt', 'Citron', 'Ivory', 'Garnet'];
 const AI_COLORS = [0xd9531e, 0x2d6cdf, 0xe2b400, 0xe8e6de, 0xa8202a];
 const PLAYER_COLOR = 0x7d8466;
 const DIFFS = [{ n: 'Rookie', s: 0.74 }, { n: 'Pro', s: 0.88 }, { n: 'Expert', s: 0.98 }];
-const game = { state: 'menu', cars: [], player: null, cfg: { opp: 3, laps: 3, diff: 1 }, t: 0, cd: 0, finished: 0, resultsT: 0 };
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) { } } };
+const initAssist = ['0', '1', '2'].includes(store.get('dl.assist')) ? +store.get('dl.assist') : 1;
+const initLine = store.get('dl.line') === null ? initAssist > 0 : store.get('dl.line') === '1';
+const game = { state: 'menu', cars: [], player: null, showLine: initLine, cfg: { opp: 3, laps: 3, diff: 1, assist: initAssist }, t: 0, cd: 0, finished: 0, resultsT: 0 };
 let msgTimer = 0;
+
+/* ----- racing line and brake marker ----- */
+const LINE_N = 44, LINE_STEP = 2, LINE_W = 0.65;
+const linePos = new Float32Array((LINE_N + 1) * 6), lineCol = new Float32Array((LINE_N + 1) * 6), lineIdx = [];
+for (let i = 0; i < LINE_N; i++) { const a = i * 2; lineIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+const lineGeo = new THREE.BufferGeometry();
+lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3).setUsage(THREE.DynamicDrawUsage));
+lineGeo.setAttribute('color', new THREE.BufferAttribute(lineCol, 3).setUsage(THREE.DynamicDrawUsage)); lineGeo.setIndex(lineIdx);
+const lineMesh = new THREE.Mesh(lineGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+lineMesh.frustumCulled = false; lineMesh.renderOrder = 3; lineMesh.visible = false; scene.add(lineMesh);
+const brakeMark = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, HALFW * 2 - 1.2), new THREE.MeshBasicMaterial({ color: 0xff3b1f, transparent: true, opacity: 0.9, depthWrite: false }));
+brakeMark.renderOrder = 4; brakeMark.visible = false; scene.add(brakeMark);
+const _lc = new THREE.Color();
+function updateLine() {
+  const car = game.player, on = !!(game.showLine && car && !car.auto && (game.state === 'racing' || game.state === 'countdown'));
+  lineMesh.visible = on; if (!on) { brakeMark.visible = false; return; }
+  const N = Track.N, sp = car.speed; let mark = -1;
+  for (let k = 0; k <= LINE_N; k++) {
+    const i = (car.idx + 2 + k * LINE_STEP) % N, P = Track.P[i], R = Track.R[i], off = clamp(Track.Ks[i] * 150, -3, 3); // aim for the inside of corners
+    const cx = P.x + R.x * off, cz = P.z + R.z * off;
+    for (let sd = 0; sd < 2; sd++) { const o = sd ? LINE_W : -LINE_W, x = cx + R.x * o, z = cz + R.z * o, j = k * 6 + sd * 3; linePos[j] = x; linePos[j + 1] = heightAt(x, z) + 0.1; linePos[j + 2] = z; }
+    const r = sp / (Track.vProf[i] * 0.97), t = clamp((r - 0.78) / 0.42, 0, 1);
+    if (t < 0.5) _lc.setRGB(0.2, 0.9, 0.35).lerp(new THREE.Color(1, 0.76, 0.2), t * 2); else _lc.setRGB(1, 0.76, 0.2).lerp(new THREE.Color(1, 0.2, 0.12), (t - 0.5) * 2);
+    for (let sd = 0; sd < 2; sd++) { const j = k * 6 + sd * 3; lineCol[j] = _lc.r; lineCol[j + 1] = _lc.g; lineCol[j + 2] = _lc.b; }
+    if (mark < 0 && r > 1.02 && k > 2) mark = k;
+  }
+  lineGeo.attributes.position.needsUpdate = lineGeo.attributes.color.needsUpdate = true; lineGeo.computeBoundingSphere();
+  if (mark >= 0) { const i = (car.idx + 2 + mark * LINE_STEP) % N, P = Track.P[i], T = Track.T[i]; brakeMark.position.set(P.x, heightAt(P.x, P.z) + 0.16, P.z); brakeMark.rotation.y = -Math.atan2(T.z, T.x); brakeMark.visible = true; } else brakeMark.visible = false;
+}
+function syncLineBtn() { $('btnLine').setAttribute('aria-pressed', game.showLine ? 'true' : 'false'); }
+function toggleLine() { game.showLine = !game.showLine; store.set('dl.line', game.showLine ? '1' : '0'); syncLineBtn(); say(game.showLine ? 'Racing line on' : 'Racing line off', 700, true); }
 
 function setupGrid() {
   for (const c of game.cars) c.dispose(); game.cars = []; skids.clear();
@@ -826,7 +878,7 @@ function setupGrid() {
     const pp = Track.P[idx], r = Track.R[idx], t = Track.T[idx];
     car.place(pp.x + r.x * side * 2.5, pp.z + r.z * side * 2.5, t.x, t.z); car.idx = idx; car.lapCount = -1;
     car.prog = -dist; car.locked = true; car.onHit = (dv, wp) => { car.dentAt(wp, clamp(dv * 0.012, 0.02, 0.2)); if (car === game.player || car.p.distanceTo(camera.position) < 40) sfx.bump(dv); if (car === game.player) camShake = Math.min(1, dv / 12); };
-    game.cars.push(car); if (isP) game.player = car;
+    car.assistLvl = game.cfg.assist; game.cars.push(car); if (isP) game.player = car;
   }
   for (const c of game.cars) c.sync(0);
 }
@@ -857,6 +909,7 @@ addEventListener('keydown', e => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   keys[e.code] = true;
   if (e.code === 'KeyR' && game.player && game.state !== 'menu') game.player.reset();
+  if (e.code === 'KeyL' && game.state !== 'menu') toggleLine();
   if (e.code === 'KeyM') { sfx.setMuted(!sfx.muted); say(sfx.muted ? 'Sound off' : 'Sound on', 700, true); }
   if (e.code === 'Escape' && game.state !== 'menu') showMenu();
 });
@@ -962,11 +1015,11 @@ function carFx(car, dt) {
     const sg = W.sig, sp = car.speed, sf = SURF[W.surf];
     if (near && sp > 2) {
       const slipV = Math.max(0, sg - 0.55) * 0.7 + (W.surf === 2 ? 0.1 : 0.05) + (Math.abs(W.kap) > 0.3 ? 0.4 : 0);
-      const rate = (sp * 0.05 * slipV) * 60 * dt;
+      const rate = (sp * 0.022 * slipV) * 60 * dt * (car === game.player ? 0.7 : 1);
       let n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
       for (; n > 0; n--) {
         const jit = () => (Math.random() - 0.5);
-        dust.emit(W.cp.x + jit() * 0.4, W.cp.y + 0.15, W.cp.z + jit() * 0.4, -car.v.x * 0.15 + jit() * 1.5, 0.6 + Math.random() * 0.9, -car.v.z * 0.15 + jit() * 1.5, 0.5 + Math.random() * 0.6 + sg * 0.2, 0.8 + Math.random() * 0.8, sf.dust, clamp(0.1 + sg * 0.15, 0.08, 0.3));
+        dust.emit(W.cp.x + jit() * 0.4, W.cp.y + 0.15, W.cp.z + jit() * 0.4, -car.v.x * 0.15 + jit() * 1.5, 0.6 + Math.random() * 0.9, -car.v.z * 0.15 + jit() * 1.5, 0.4 + Math.random() * 0.5 + sg * 0.15, 0.5 + Math.random() * 0.6, sf.dust, clamp(0.06 + sg * 0.08, 0.05, 0.16));
       }
     }
     if (sg > 1.05 && sp > 3 && W.surf < 2) {
@@ -1070,7 +1123,7 @@ function simulate(dt) {
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000); last = now; if (dt <= 0) return;
-  const S = game.state; simulate(dt);
+  const S = game.state; simulate(dt); updateLine();
   updateCamera(dt);
   // sun & sky follow
   const cp = game.player.p; sun.position.set(cp.x + SUNDIR.x * 150, cp.y + SUNDIR.y * 150, cp.z + SUNDIR.z * 150); sun.target.position.copy(cp);
@@ -1092,6 +1145,11 @@ function seg(id, items, get, set, words) {
 seg('sOpp', ['1', '2', '3', '4', '5'], () => game.cfg.opp - 1, i => { game.cfg.opp = i + 1; setupGrid(); });
 seg('sLaps', ['1', '2', '3', '4', '5'], () => game.cfg.laps - 1, i => { game.cfg.laps = i + 1; });
 seg('sDiff', DIFFS.map(d => d.n), () => game.cfg.diff, i => { game.cfg.diff = i; setupGrid(); });
+const LV = [2, 1, 0], HINTS = { 2: 'Steering, braking and traction help. Racing line on. Best for learning.', 1: 'Steering and stability help. Racing line on. A good balance.', 0: 'No driver aids and direct steering. Racing line off. Full simulation.' };
+const setHint = () => { $('assistHint').textContent = HINTS[game.cfg.assist]; };
+seg('sAssist', ['Easy', 'Normal', 'Pro'], () => LV.indexOf(game.cfg.assist), i => { game.cfg.assist = LV[i]; game.showLine = LV[i] > 0; store.set('dl.assist', LV[i]); store.set('dl.line', game.showLine ? '1' : '0'); syncLineBtn(); setHint(); if (game.player) game.player.assistLvl = LV[i]; });
+setHint(); syncLineBtn();
+$('btnLine').onclick = toggleLine;
 $('btnStart').onclick = startRace;
 $('btnAgain').onclick = startRace;
 $('btnBack').onclick = showMenu;
