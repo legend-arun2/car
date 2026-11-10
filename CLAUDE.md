@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Dustline Rally: a single-file 3D off-road racing game (three.js). The whole game is `index.html` (HTML, CSS and one `<script type="module">`). There is no build step, no package manager, no linter and no test suite in the repo. `.nojekyll` and `README.md` are the only other files.
+Dustline Rally: a single-file 3D off-road racing game (three.js). The whole game is `index.html` (HTML, CSS and one `<script type="module">`). There is no build step, no package manager, no linter and no test suite in the repo. The other files are `README.md`, `SECURITY.md`, `CLAUDE.md` and `.nojekyll`.
 
 - Live site: GitHub Pages from `main` / root, https://legend-arun2.github.io/car/ . Every push to `main` triggers a "pages build and deployment" run.
-- three.js `0.184.0` loads from unpkg through an import map with integrity hashes (`index.html` near line 150). Fonts load from Google Fonts. There is no local copy of three.js, so the game needs internet.
+- three.js `0.184.0` loads from unpkg through an import map with integrity hashes (`grep -n importmap index.html`). Fonts load from Google Fonts. There is no local copy of three.js, so the game needs internet.
 
 ## Running it
 
@@ -35,13 +35,14 @@ Sections are marked with `/* ===== ... ===== */` comments:
 2. **Car model**: `buildCar(color, number)` builds the Rally Supercar from primitives and merges its meshes by material (the original has about 330 meshes per car). Wheels are named groups driven by the physics.
 3. **Vehicle physics (`class Car`)**: a custom rigid body stepped at a fixed 240 Hz (`DT`) inside the main loop. Four raycast suspension wheels, a Pacejka-style tyre model with surface-dependent grip, a gearbox and torque curve, body-vs-ground and sphere-vs-tree impulses, and visual dents. **The same `Car.step` drives the player and the AI**, so a physics change affects both and must be checked on both.
 4. **Driver assists**: `assistLvl` (0 Pro, 1 Normal, 2 Easy) applies to the human player only (`ai` and `auto` cars use level 0 inside `step`). Easy and Normal turn the steering input into a requested turn rate (`AY_EASY`/`AY_NORMAL`) and push the car toward it with a yaw assist, add grip that builds with speed, bleed off sideways velocity, and apply turn-in scrub. Pro uses direct wheel-angle steering. Tuning constants sit near the top of the vehicle physics section.
-5. **AI (`aiControl`)**: follows the centre line with a lane offset, pure-pursuit steering plus a curvature feed-forward, and speed from `Track.vProf` scaled by the difficulty `skill`. If you change grip or aero, re-run an AI-only race: the AI lap times (about 103-107 s on Pro difficulty) are the regression baseline.
-6. **Game layer**: `game` object (state machine `menu` / `countdown` / `racing` / `finished`), grid setup, lap and position tracking via `locate()`, car-car collisions, chase camera, HUD and minimap, the racing line mesh (`updateLine`), dust and skid-mark effects, procedural Web Audio (`Sfx`), keyboard and touch input, menu wiring.
+5. **AI (`aiControl`)**: follows the centre line with a lane offset, pure-pursuit steering plus a curvature feed-forward, and speed from `Track.vProf` scaled by the difficulty `skill`. If you change grip or aero, re-run an AI-only race: the AI lap times (about 103-110 s on Pro difficulty, with a slower first lap) are the regression baseline.
+6. **Game layer**: `game` object (state machine `menu` / `countdown` / `racing` / `finished`), grid setup, lap and position tracking via `locate()` (a lap is recorded only when `c.maxLap` rises, so backing over the start line cannot add laps), car-car collisions (two-body impulse with denominator `kEff(A) + kEff(B)` and restitution about 0.2; do not subtract `1/MASS`), chase camera, HUD and minimap, the racing line mesh (`updateLine`), dust and skid-mark effects, procedural Web Audio (`Sfx`), keyboard and touch input, menu wiring.
 7. `frame()` calls `simulate(dt)` (physics and race logic), then `updateLine()` and `updateCamera()`, then renders. Menu choices (assist level, racing line) are saved in `localStorage` under `dl.assist` and `dl.line`, always through the try/catch `store` wrapper.
 
 ## Conventions and gotchas
 
 - Coordinate system: car forward is local +x, up is +y, and local +z is the car's right. A right turn is therefore a negative yaw rate about the up axis. Getting this sign wrong inverts a stability control.
+- There is no `results` state: when the player finishes, `game.state` stays `'finished'` while the results panel shows. `aiControl` must keep driving in `'finished'` (it once braked every car into reverse there), and the stuck/reset logic also runs in that state.
 - Forces added to `F` after the `this.v.addScaledVector(F, dt / MASS)` line in `Car.step` have no effect; assists applied after that point change `v` directly.
 - The game is also published as a private claude.ai artifact (https://claude.ai/artifact/KJpdMtR6Ldx55Cag9SvSb8). That copy is `index.html` without its first five lines (doctype, charset, the CSP and referrer metas, and the viewport meta, which the artifact wrapper adds or replaces) and without the two `<link rel="modulepreload">` lines. The artifact runs under its own stricter CSP. Republish it after meaningful changes.
 - Security setup (details in `SECURITY.md`): a `<meta>` CSP (`script-src` allows only inline script and `https://unpkg.com/three@0.184.0/build/`; styles allow inline and Google Fonts; no network connections) plus `referrer: no-referrer`. `'unsafe-inline'` is deliberate, since the import map and the game script are inline. The results table is built with DOM methods, never `innerHTML` with names; keep it that way if player names are ever added.
