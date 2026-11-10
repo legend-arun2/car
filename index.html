@@ -1,5 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://unpkg.com/three@0.184.0/build/; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Dustline Rally</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -83,10 +85,21 @@ table.res tr.me td{color:var(--amber);font-weight:700}
 .pedals{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:max(18px,env(safe-area-inset-bottom,0px));display:flex;gap:10px;align-items:flex-end}
 .pedal{pointer-events:auto;touch-action:none;width:70px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--sand);font:700 16px var(--disp);letter-spacing:.1em;display:flex;align-items:flex-end;justify-content:center;padding-bottom:10px}
 .pedal.on{background:var(--signal);color:#fff}
-#touch .side{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(max(18px,env(safe-area-inset-bottom,0px)) + 94px);display:flex;gap:8px}
+#touch .side{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(max(18px,env(safe-area-inset-bottom,0px)) + 104px);display:flex;gap:8px}
 #touch .ibtn{pointer-events:auto;touch-action:none}
 .ibtn.on{background:var(--signal);border-color:var(--signal);color:#fff}
-@media (max-width:640px){#br{bottom:calc(max(12px,env(safe-area-inset-bottom,0px)) + 158px)}#bl{bottom:auto;top:84px;width:120px}.screen{background:rgba(16,13,11,.82)}}
+#app.touch-on #br{bottom:calc(max(12px,env(safe-area-inset-bottom,0px)) + 158px)}
+#app.touch-on #bl{bottom:auto;top:84px;width:120px}
+@media (max-width:640px){.screen{background:rgba(16,13,11,.82)}}
+@media (max-width:420px){ /* narrow phones: the top-left chips and the right column must not collide */
+  #tl{gap:6px}#tl .chip{min-width:64px;padding:6px 9px}#mapwrap{width:108px}#times{min-width:112px}.pedal{width:62px}
+}
+@media (max-height:480px){ /* landscape phones: speed readout sits between the steering pad and the pedals, and the right column is compact */
+  #app.touch-on #br{left:50%;right:auto;transform:translateX(-50%);bottom:max(12px,env(safe-area-inset-bottom,0px));align-items:center;width:clamp(150px,26vw,220px)}
+  #mapwrap{width:96px}#times span{display:none}#times{min-width:0}
+  #steer{width:min(34vw,240px)}
+  #tBrake{height:80px!important}#tGas{height:104px!important}
+}
 @media (prefers-reduced-motion:reduce){.bar i,#msg,#hint{transition:none}}
 </style>
 
@@ -147,6 +160,8 @@ table.res tr.me td{color:var(--amber);font-weight:700}
   </div>
 </div>
 
+<link rel="modulepreload" href="https://unpkg.com/three@0.184.0/build/three.module.js" integrity="sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J" crossorigin="anonymous">
+<link rel="modulepreload" href="https://unpkg.com/three@0.184.0/build/three.core.js" integrity="sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT" crossorigin="anonymous">
 <script type="importmap">
 {
   "imports": { "three": "https://unpkg.com/three@0.184.0/build/three.module.js" },
@@ -520,7 +535,7 @@ function buildCar(color, num) {
   for (const s of [1, -1]) { const d = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), decalMat); d.position.set(0.1, 0.68, s * 0.925); if (s < 0) d.rotation.y = Math.PI; out.add(d); }
   const dtop = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.36), decalMat); dtop.rotation.x = -Math.PI / 2; dtop.rotation.z = -Math.PI / 2; dtop.position.set(-0.62, 1.362, 0); out.add(dtop);
   // wheel order: front-left, front-right, rear-left, rear-right  (matches physics wheel order)
-  return { group: out, wheels: wheelOut, paint, dent, baseColor: new THREE.Color(color) };
+  return { group: out, wheels: wheelOut, paint, dent, decalMat, baseColor: new THREE.Color(color) };
 }
 
 /* ================= VEHICLE PHYSICS ================= */
@@ -546,7 +561,7 @@ class Car {
     this.gear = 1; this.rpm = IDLE; this.shiftT = 0; this.reverse = false; this.damage = 0;
     this.vFwd = 0; this.speed = 0; this.vLocal = new V3(); this.upY = 1; this.idx = 0; this.lapCount = -1; this.prog = 0;
     this.skill = 1; this.lane = 0; this.laneCur = 0; this.stuckT = 0; this.flipT = 0; this.offT = 0; this.wrongT = 0; this.impactCd = 0;
-    this.finished = false; this.finishT = 0; this.lapStart = 0; this.lapTimes = []; this.curLap = 0; this.locked = true; this.auto = false;
+    this.maxLap = 0; this.finished = false; this.finishT = 0; this.lapStart = 0; this.lapTimes = []; this.curLap = 0; this.locked = true; this.auto = false;
     this.slipRear = 0; this.onGround = 0; this.surf = 0; this.assistLvl = 1; this.rtDes = 0; this.scTarget = 0; this.distRoad = 0;
   }
   place(x, z, dx, dz) {
@@ -749,7 +764,7 @@ class Car {
     }
     const k = this.damage; this.model.paint.color.copy(this.model.baseColor).lerp(new THREE.Color(0x2a221b), k * 0.65);
   }
-  dispose() { scene.remove(this.group); this.group.traverse(o => { if (o.isMesh) { o.geometry.dispose(); } }); this.model.paint.dispose(); }
+  dispose() { scene.remove(this.group); this.group.traverse(o => { if (o.isMesh) { o.geometry.dispose(); } }); this.model.paint.dispose(); this.model.decalMat.map.dispose(); this.model.decalMat.dispose(); }
 }
 
 /* ================= EFFECTS ================= */
@@ -913,11 +928,14 @@ function ranking() { return game.cars.slice().sort((a, b) => (a.finished && b.fi
 
 function startRace() {
   setupGrid(); sfx.init(); game.state = 'countdown'; game.cd = 3.4; game.t = 0; game.finished = 0;
-  $('menu').hidden = true; $('results').hidden = true; $('hud').hidden = false; $('touch').hidden = !showTouch; lastCd = 4;
+  $('menu').hidden = true; $('results').hidden = true; $('hud').hidden = false; syncTouch(); clearTouch(); lastCd = 4;
   $('tlast').textContent = 'Last lap  --'; $('tbest').textContent = 'Best lap  --';
 }
-function showMenu() { game.state = 'menu'; setupGrid(); $('menu').hidden = false; $('results').hidden = true; $('hud').hidden = true; $('touch').hidden = true; sfx.update(null, false); }
+function showMenu() { game.state = 'menu'; setupGrid(); $('menu').hidden = false; $('results').hidden = true; $('hud').hidden = true; syncTouch(); clearTouch(); sfx.update(null, false); }
 let lastCd = 4;
+// touch controls show only while racing, and the HUD makes room for them (class on #app)
+function syncTouch() { const on = showTouch && game.state !== 'menu' && $('results').hidden; $('touch').hidden = !on; $('app').classList.toggle('touch-on', on); }
+function clearTouch() { touch.steer = touch.gas = touch.brake = touch.hand = 0; $('steer').querySelector('i').style.marginLeft = '-34px'; for (const id of ['tGas', 'tBrake', 'tHand']) $(id).classList.remove('on'); }
 function say(text, ms = 1000, small = false) { const m = $('msg'); m.textContent = text; m.className = small ? 'sm' : ''; m.style.opacity = 1; msgTimer = ms / 1000; }
 
 /* ----- input ----- */
@@ -926,13 +944,15 @@ const touch = { steer: 0, gas: 0, brake: 0, hand: 0 };
 addEventListener('keydown', e => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
   keys[e.code] = true;
+  if (e.repeat) return;
   if (e.code === 'KeyR' && game.player && game.state !== 'menu') game.player.reset();
   if (e.code === 'KeyL' && game.state !== 'menu') toggleLine();
   if (e.code === 'KeyM') { sfx.setMuted(!sfx.muted); say(sfx.muted ? 'Sound off' : 'Sound on', 700, true); }
   if (e.code === 'Escape' && game.state !== 'menu') showMenu();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; clearTouch(); });
+document.addEventListener('visibilitychange', () => { if (sfx.ctx) { if (document.hidden) sfx.ctx.suspend(); else sfx.ctx.resume(); } });
 function readPlayer(car) {
   const k = keys, i = car.inp;
   const gas = (k.KeyW || k.ArrowUp) ? 1 : 0, brk = (k.KeyS || k.ArrowDown) ? 1 : 0, st = ((k.KeyD || k.ArrowRight) ? 1 : 0) - ((k.KeyA || k.ArrowLeft) ? 1 : 0);
@@ -941,13 +961,18 @@ function readPlayer(car) {
 }
 // touch
 {
-  const steer = $('steer'), knob = steer.querySelector('i');
+  const steer = $('steer'), knob = steer.querySelector('i'); let steerId = null;
   const setS = e => { const r = steer.getBoundingClientRect(); const v = clamp(((e.clientX - r.left) / r.width - 0.5) * 2.2, -1, 1); touch.steer = Math.abs(v) < 0.08 ? 0 : v; knob.style.marginLeft = (-34 + touch.steer * (r.width / 2 - 42)) + 'px'; };
-  steer.addEventListener('pointerdown', e => { steer.setPointerCapture(e.pointerId); setS(e); });
-  steer.addEventListener('pointermove', e => { if (steer.hasPointerCapture(e.pointerId)) setS(e); });
-  const end = () => { touch.steer = 0; knob.style.marginLeft = '-34px'; };
-  steer.addEventListener('pointerup', end); steer.addEventListener('pointercancel', end);
-  const pedal = (id, key) => { const el = $(id); el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); touch[key] = 1; el.classList.add('on'); }); const up = () => { touch[key] = 0; el.classList.remove('on'); }; el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); };
+  steer.addEventListener('pointerdown', e => { steerId = e.pointerId; steer.setPointerCapture(e.pointerId); setS(e); });
+  steer.addEventListener('pointermove', e => { if (e.pointerId === steerId && steer.hasPointerCapture(e.pointerId)) setS(e); });
+  const end = e => { if (e.pointerId !== steerId) return; steerId = null; touch.steer = 0; knob.style.marginLeft = '-34px'; };
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) steer.addEventListener(ev, end);
+  const pedal = (id, key) => {
+    const el = $(id); let pid = null;
+    el.addEventListener('pointerdown', e => { pid = e.pointerId; el.setPointerCapture(e.pointerId); touch[key] = 1; el.classList.add('on'); });
+    const up = e => { if (e.pointerId !== pid) return; pid = null; touch[key] = 0; el.classList.remove('on'); };
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, up);
+  };
   pedal('tGas', 'gas'); pedal('tBrake', 'brake'); pedal('tHand', 'hand');
   $('tReset').addEventListener('click', () => game.player && game.player.reset());
 }
@@ -955,7 +980,7 @@ function readPlayer(car) {
 /* ----- AI ----- */
 function aiControl(car, dt) {
   const N = Track.N, sp = Math.max(0, car.vFwd), inp = car.inp;
-  if (game.state !== 'racing' || car.locked) { inp.thr = 0; inp.brk = 1; inp.hand = 0; inp.steer = 0; return; }
+  if ((game.state !== 'racing' && game.state !== 'finished') || car.locked) { inp.thr = 0; inp.brk = 1; inp.hand = 0; inp.steer = 0; return; }
   // avoidance
   let laneT = car.lane, blockedSpeed = 1e9;
   const lat = (car.p.x - Track.P[car.idx].x) * Track.R[car.idx].x + (car.p.z - Track.P[car.idx].z) * Track.R[car.idx].z;
@@ -992,7 +1017,7 @@ function carCollisions() {
       const va = new V3().crossVectors(A.w, ra).add(A.v), vb = new V3().crossVectors(B.w, rb).add(B.v), vn = va.sub(vb).dot(n);
       A.p.addScaledVector(n, pen * 0.25); B.p.addScaledVector(n, -pen * 0.25);
       if (vn >= 0) continue;
-      const k = A.kEff(ra, n) + B.kEff(rb, n) - 1 / MASS, j = -(1.2) * vn / k, J = n.clone().multiplyScalar(j);
+      const k = A.kEff(ra, n) + B.kEff(rb, n), j = -(1.2) * vn / k, J = n.clone().multiplyScalar(j);
       A.impulse(ra, J); B.impulse(rb, J.clone().negate()); A.hurt(-vn * 0.7, mid); B.hurt(-vn * 0.7, mid);
     }
   }
@@ -1007,10 +1032,10 @@ function updateCamera(dt) {
     const f = car.fwd(), th = Math.atan2(f.z, f.x) + 0.55 + 0.4 * Math.sin(orbit), r = 14 + game.cars.length * 1.6;
     camera.position.set(c.x + Math.cos(th) * r, c.y + 2.4, c.z + Math.sin(th) * r); camLook.set(c.x, c.y + 0.6, c.z); camera.fov = 42;
     camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 1.2);
-    camera.lookAt(camLook); camera.updateProjectionMatrix(); return;
+    camera.lookAt(camLook); camera.updateProjectionMatrix(); dustScale(); return;
   }
   const f = car.fwd(), hc = Math.atan2(f.z, f.x), sp = car.speed;
-  let ht = hc; if (sp > 4) ht = hc + wrapA(Math.atan2(car.v.z, car.v.x) - hc) * 0.6 * smooth(3, 12, sp);
+  let ht = hc; if (sp > 4 && car.vFwd > 1) ht = hc + wrapA(Math.atan2(car.v.z, car.v.x) - hc) * 0.6 * smooth(3, 12, sp);
   camHead += wrapA(ht - camHead) * (1 - Math.exp(-dt * 5.5));
   const dist = 6.6 + sp * 0.02, dx = Math.cos(camHead), dz = Math.sin(camHead);
   const tx = car.p.x - dx * dist, tz = car.p.z - dz * dist, ty = Math.max(car.p.y + 2.2, heightAt(tx, tz) + 1.2);
@@ -1021,7 +1046,7 @@ function updateCamera(dt) {
   camera.position.x += (Math.random() - 0.5) * sh; camera.position.y += (Math.random() - 0.5) * sh;
   const lookSide = car.steerS * 3.2 * smooth(10, 40, sp) * (car.assistLvl > 0 && !car.auto ? 1 : 0); // look into the turn at speed
   camLook.set(car.p.x + dx * 4 - dz * lookSide, car.p.y + 0.9, car.p.z + dz * 4 + dx * lookSide); camera.lookAt(camLook);
-  camera.fov = (innerWidth / innerHeight < 1 ? 82 : 60) + 14 * smooth(10, 62, sp); camera.updateProjectionMatrix();
+  camera.fov = (innerWidth / innerHeight < 1 ? 82 : 60) + 14 * smooth(10, 62, sp); camera.updateProjectionMatrix(); dustScale();
 }
 
 /* ----- FX per frame ----- */
@@ -1089,9 +1114,15 @@ function showResults() {
   const rank = ranking(), p = game.player, pos = rank.indexOf(p) + 1;
   $('resTitle').textContent = ord(pos) + ' place'; $('resEyebrow').textContent = pos === 1 ? 'Stage winner' : 'Race finished';
   const best = Math.min(...p.lapTimes, Infinity);
-  let h = ''; rank.forEach((c, i) => { h += `<tr class="${c === p ? 'me' : ''}"><td>${i + 1}</td><td><span class="sw" style="background:#${c.color.toString(16).padStart(6, '0')}"></span>${c.name}</td><td>${c.finished ? fmt(c.finishT) : 'Lap ' + clamp(Math.floor(c.prog / Track.L) + 1, 1, game.cfg.laps)}</td></tr>`; });
-  h += `<tr><td></td><td style="color:var(--dim)">Your best lap</td><td>${isFinite(best) ? fmt(best) : '--'}</td></tr>`;
-  $('resTable').innerHTML = h; $('results').hidden = false; $('hud').hidden = true; $('touch').hidden = true;
+  const tb = $('resTable'); tb.textContent = '';
+  const cell = (tr, txt) => { const td = tr.insertCell(); td.textContent = txt; return td; };
+  rank.forEach((c, i) => {
+    const tr = tb.insertRow(); if (c === p) tr.className = 'me'; cell(tr, i + 1);
+    const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = '#' + c.color.toString(16).padStart(6, '0'); cell(tr, c.name).prepend(sw);
+    cell(tr, c.finished ? fmt(c.finishT) : 'Lap ' + clamp(Math.floor(c.prog / Track.L) + 1, 1, game.cfg.laps));
+  });
+  { const tr = tb.insertRow(); cell(tr, ''); cell(tr, 'Your best lap').style.color = 'var(--dim)'; cell(tr, isFinite(best) ? fmt(best) : '--'); }
+  $('results').hidden = false; $('hud').hidden = true; syncTouch(); clearTouch();
 }
 
 /* ----- main loop ----- */
@@ -1119,7 +1150,7 @@ function simulate(dt) {
     locate(c); c.sync(dt);
     const lapNow = Math.floor(c.prog / Track.L);
     if (c.curLap !== lapNow && game.state !== 'menu') {
-      if (lapNow > c.curLap && lapNow >= 1) { const lt = game.t - c.lapStart; c.lapTimes.push(lt); c.lapStart = game.t; if (c === game.player && !c.auto) { $('tlast').textContent = 'Last lap  ' + fmt(lt); $('tbest').textContent = 'Best lap  ' + fmt(Math.min(...c.lapTimes)); if (lapNow < game.cfg.laps) say('LAP ' + (lapNow + 1), 1000, true); } }
+      if (lapNow >= 1 && lapNow > c.maxLap) { c.maxLap = lapNow; const lt = game.t - c.lapStart; c.lapTimes.push(lt); c.lapStart = game.t; if (c === game.player && !c.auto) { $('tlast').textContent = 'Last lap  ' + fmt(lt); $('tbest').textContent = 'Best lap  ' + fmt(Math.min(...c.lapTimes)); if (lapNow < game.cfg.laps) say('LAP ' + (lapNow + 1), 1000, true); } }
       c.curLap = lapNow;
     }
     if (!c.finished && game.state !== 'menu' && game.state !== 'countdown' && c.prog >= game.cfg.laps * Track.L) {
@@ -1150,9 +1181,9 @@ function frame(now) {
   if (S !== 'menu') { updateHud(); sfx.update(game.player, true); } else sfx.update(null, false);
   renderer.render(scene, camera);
 }
+function dustScale() { dust.mat.uniforms.uScale.value = renderer.getPixelRatio() * innerHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.5; }
 function resize() {
-  const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-  dust.mat.uniforms.uScale.value = renderer.getPixelRatio() * h / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) * 0.5;
+  const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); dustScale();
 }
 addEventListener('resize', resize);
 
@@ -1174,8 +1205,8 @@ $('btnAgain').onclick = startRace;
 $('btnBack').onclick = showMenu;
 $('btnMenu').onclick = showMenu;
 showTouch = coarse || 'ontouchstart' in window; $('chkTouch').checked = showTouch;
-$('chkTouch').onchange = e => { showTouch = e.target.checked; if (game.state !== 'menu') $('touch').hidden = !showTouch; };
+$('chkTouch').onchange = e => { showTouch = e.target.checked; syncTouch(); };
 
 setupGrid(); resize(); requestAnimationFrame(t => { last = t; frame(t); });
-window.__dbg = { OBST, simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids };
+window.__dbg = { OBST, carCollisions, simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids };
 </script>

@@ -19,11 +19,11 @@ python3 -m http.server 8000
 
 ## Testing
 
-There are no committed tests. Behaviour has been verified with throwaway headless Playwright scripts that drive the page through the `window.__dbg` hook (last line of the script: `OBST, simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids`). Useful patterns:
+There are no committed tests. Behaviour has been verified with throwaway headless Playwright scripts that drive the page through the `window.__dbg` hook (last line of the script: `OBST, carCollisions, simulate, game, Track, Car, heightAt, THREE, startRace, showMenu, keys, touch, renderer, camera, scene, dust, skids`). Useful patterns:
 
 - Step the simulation without rendering: `d.startRace()`, then `d.simulate(1/60)` in a loop (about 4 s of steps passes the countdown). Real-time rendering is far too slow under software GL (about 4 fps), so never wait on `requestAnimationFrame` for physics tests.
 - Drive the player by setting `d.keys.KeyW/KeyA/KeyS/KeyD/Space` before each `simulate` call. Set `game.player.auto = true` to let the AI drive the player car.
-- For a local test copy, replace the `<script type="importmap">` block with one that maps `three` to a local `node_modules/three/build/three.module.js` (the unpkg integrity hashes will not match a local file). Chromium needs `--use-gl=swiftshader --enable-unsafe-swiftshader`.
+- For a local test copy, replace the `<script type="importmap">` block with one that maps `three` to a local `node_modules/three/build/three.module.js`, and delete the CSP `<meta>` and the two `modulepreload` links (the CSP only allows the unpkg path). To test the CSP and integrity as shipped, instead serve the npm `three@0.184.0` `build/` folder from localhost and rewrite `https://unpkg.com/` to that origin in the copy; the npm files match both integrity hashes. Chromium needs `--use-gl=swiftshader --enable-unsafe-swiftshader`.
 - To test turning, call `d.OBST.clear()` first, otherwise trees at the road edge cause crashes that look like instability.
 - Useful metrics: heading change after holding full lock for 2 s at 100/150/190 km/h, and a crude keyboard-style driver around the lap (distance, time off road, spins).
 
@@ -43,5 +43,7 @@ Sections are marked with `/* ===== ... ===== */` comments:
 
 - Coordinate system: car forward is local +x, up is +y, and local +z is the car's right. A right turn is therefore a negative yaw rate about the up axis. Getting this sign wrong inverts a stability control.
 - Forces added to `F` after the `this.v.addScaledVector(F, dt / MASS)` line in `Car.step` have no effect; assists applied after that point change `v` directly.
-- The game is also published as a private claude.ai artifact (https://claude.ai/artifact/KJpdMtR6Ldx55Cag9SvSb8). That copy is `index.html` without its first three lines (the doctype and the charset and viewport metas, which the artifact wrapper adds). Republish it after meaningful changes.
-- Do not change the three.js version without updating both import-map integrity hashes.
+- The game is also published as a private claude.ai artifact (https://claude.ai/artifact/KJpdMtR6Ldx55Cag9SvSb8). That copy is `index.html` without its first five lines (doctype, charset, the CSP and referrer metas, and the viewport meta, which the artifact wrapper adds or replaces) and without the two `<link rel="modulepreload">` lines. The artifact runs under its own stricter CSP. Republish it after meaningful changes.
+- Security setup (details in `SECURITY.md`): a `<meta>` CSP (`script-src` allows only inline script and `https://unpkg.com/three@0.184.0/build/`; styles allow inline and Google Fonts; no network connections) plus `referrer: no-referrer`. `'unsafe-inline'` is deliberate, since the import map and the game script are inline. The results table is built with DOM methods, never `innerHTML` with names; keep it that way if player names are ever added.
+- To change the three.js version, update all of: the import map entries and integrity hashes, the two `modulepreload` links (href and integrity), and the path in the CSP `script-src`. Hashes: `openssl dgst -sha384 -binary FILE | openssl base64 -A`, prefixed with `sha384-`.
+- Touch controls: `syncTouch()` shows them only while racing and sets `touch-on` on `#app`, which the HUD layout keys off (landscape phones use the `max-height:480px` media block). `clearTouch()` resets held pedals on race start, menu, results and window blur.
